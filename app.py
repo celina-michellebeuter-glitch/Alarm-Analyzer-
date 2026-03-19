@@ -2,91 +2,102 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Seiteneinstellungen
-st.set_page_config(page_title="Alarm Analyse Tool", layout="wide")
+# Basic Page Configuration
+st.set_page_config(page_title="Global Alarm Analyzer", layout="wide")
 
-st.title("Alarm Analysis")
-st.info("Upload your Excel or CSV file. The tool will automatically calculate the distribution and timing.")
+st.title("📊 Global Alarm & Device Analyzer")
+st.markdown("""
+This tool analyzes device alarms from CSV or Excel files. 
+It calculates the distribution per country and shows the timeline of events.
+""")
 
-# Datei Upload
-uploaded_file = st.file_uploader("Upload file here (CSV or Excel)", type=["csv", "xlsx"])
+# 1. File Upload
+uploaded_file = st.file_uploader("Upload your data file (CSV or Excel)", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
     try:
-        # 1. Daten einlesen mit automatischer Formaterkennung
+        # Load data with automatic separator detection for CSV
         if uploaded_file.name.endswith('.csv'):
-            # sep=None und engine='python' erkennt automatisch Komma oder Semikolon
             df = pd.read_csv(uploaded_file, sep=None, engine='python')
         else:
             df = pd.read_excel(uploaded_file)
 
-        # 2. Spalten-Identifikation (Wir suchen nach COUNTRY und ALARM TIMESTAMP)
-        # Wir machen die Suche flexibel, falls Leerzeichen davor/danach sind
-        cols = {col.strip().upper(): col for col in df.columns}
+        st.success(f"✅ File loaded successfully! ({len(df)} rows found)")
         
-        col_country = cols.get("COUNTRY")
-        col_time = cols.get("ALARM TIMESTAMP")
+        # 2. Flexible Column Selection in Sidebar
+        st.sidebar.header("⚙️ Settings")
+        st.sidebar.write("Select the columns for analysis:")
+        
+        all_columns = list(df.columns)
 
-        if col_country and col_time:
-            # Zeitspalte in echtes Datum umwandeln
-            df[col_time] = pd.to_datetime(df[col_time], errors='coerce')
-            # Zeilen ohne gültiges Datum entfernen
-            df = df.dropna(subset=[col_time])
-            
-            # --- ANALYSE 1: GERÄTE PRO LAND ---
-            st.divider()
-            st.header("1. Affected devices by country")
-            
-            # Berechnung der Anzahl und Prozente
-            country_stats = df[col_country].value_counts().reset_index()
-            country_stats.columns = ['Land', 'Anzahl Alarme']
-            
-            total_alarms = country_stats['Anzahl Alarme'].sum()
-            country_stats['Anteil in %'] = ((country_stats['Anzahl Alarme'] / total_alarms) * 100).round(2)
-            
-            c1, c2 = st.columns([1, 2])
-            with c1:
-                st.subheader("Übersichtstabelle")
-                # Formatierung für die Prozentanzeige in der Tabelle
-                st.dataframe(country_stats.style.format({'Anteil in %': '{:.2f}%'}), use_container_width=True)
-                
-            with c2:
-                fig_pie = px.pie(country_stats, values='Anzahl Alarme', names='Land', 
-                                 title="Prozentuale Verteilung der Alarme",
-                                 hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
-                st.plotly_chart(fig_pie, use_container_width=True)
+        # Smart helper to guess the correct column based on keywords
+        def guess_col(options, keywords):
+            for k in keywords:
+                for opt in options:
+                    if k.lower() in str(opt).lower():
+                        return opt
+            return options[0]
 
-            # --- ANALYSE 2: ZEITLICHE ANALYSE ---
-            st.divider()
-            st.header("2. When did the alarms go off?")
-            
-            # Datum extrahieren für die Grafik (Tag-genau)
-            df['Datum'] = df[col_time].dt.date
-            timeline = df.groupby(['Datum', col_country]).size().reset_index(name='Alarme')
-            
-            fig_line = px.line(timeline, x='Datum', y='Alarme', color=col_country,
-                               markers=True, title="Time series by country",
-                               labels={'Alarme': 'Anzahl Alarme', 'Datum': 'Tag'})
-            
-            # Grafik schöner machen
-            fig_line.update_layout(hovermode="x unified")
-            st.plotly_chart(fig_line, use_container_width=True)
-            
-            # Rohdaten-Check
-            with st.expander("Preview of the processed data"):
-                st.write(df[[col_country, col_time]].sort_values(by=col_time))
+        # User chooses the columns (pre-selected by smart guessing)
+        sel_country = st.sidebar.selectbox(
+            "Which column represents the COUNTRY?", 
+            all_columns, 
+            index=all_columns.index(guess_col(all_columns, ["country", "land", "region", "nation"]))
+        )
 
-        else:
-            st.error("⚠️ Error: The columns ‘COUNTRY’ or ‘ALARM TIMESTAMP’ were not found.")
-            st.write("Columns found in your file:", list(df.columns))
-            st.info("Please check to make sure the column headers are in the first row of your file.")
+        sel_time = st.sidebar.selectbox(
+            "Which column represents the TIMESTAMP?", 
+            all_columns, 
+            index=all_columns.index(guess_col(all_columns, ["time", "date", "timestamp", "datum", "at"]))
+        )
+
+        # 3. Data Processing
+        # Convert to datetime and drop rows with invalid dates
+        df[sel_time] = pd.to_datetime(df[sel_time], errors='coerce')
+        df = df.dropna(subset=[sel_time])
+
+        # --- ANALYSIS 1: Devices/Alarms per Country ---
+        st.divider()
+        st.header(f"1. Distribution by {sel_country}")
+        
+        stats = df[sel_country].value_counts().reset_index()
+        stats.columns = [sel_country, 'Alarm Count']
+        stats['Percentage'] = (stats['Alarm Count'] / stats['Alarm Count'].sum() * 100).round(2)
+        
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.subheader("Data Summary")
+            # Display table with formatted percentage
+            st.dataframe(stats.style.format({'Percentage': '{:.2f}%'}), use_container_width=True)
+        with col2:
+            fig_pie = px.pie(stats, values='Alarm Count', names=sel_country, 
+                             hole=0.4, title=f"Proportional Distribution ({sel_country})",
+                             color_discrete_sequence=px.colors.qualitative.Safe)
+            st.plotly_chart(fig_pie, use_container_width=True)
+
+        # --- ANALYSIS 2: Time Series ---
+        st.divider()
+        st.header(f"2. Alarm Timeline ({sel_time})")
+        
+        # Group by Date (Daily)
+        df['Date_Only'] = df[sel_time].dt.date
+        timeline = df.groupby(['Date_Only', sel_country]).size().reset_index(name='Alarms')
+        
+        fig_line = px.line(timeline, x='Date_Only', y='Alarms', color=sel_country,
+                           markers=True, title="When did the alarms occur per country?",
+                           labels={'Alarms': 'Number of Alarms', 'Date_Only': 'Date'})
+        
+        fig_line.update_layout(xaxis_title="Date", yaxis_title="Number of Alarms", hovermode="x unified")
+        st.plotly_chart(fig_line, use_container_width=True)
+
+        # Full Data Preview
+        with st.expander("View Raw Data Details"):
+            st.write("Sorted by timestamp:")
+            st.dataframe(df.sort_values(by=sel_time), use_container_width=True)
 
     except Exception as e:
-        st.error(f"❌ A technical error has occurred: {e}")
+        st.error(f"❌ An error occurred during processing: {e}")
+        st.info("Tip: Please ensure your file has headers in the first row.")
 
 else:
-    st.write("---")
-    st.markdown("### Anleitung:")
-    st.write("1.  Export your data as an Excel or CSV file.")
-    st.write("2. Make sure that the **‘COUNTRY’** and **‘ALARM TIMESTAMP’** columns are present.")
-    st.write("3. Upload the file above.")
+    st.info("Please upload a file to begin the analysis.")
