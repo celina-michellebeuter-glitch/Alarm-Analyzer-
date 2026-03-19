@@ -61,7 +61,7 @@ if uploaded_file is not None:
 
         # Adjust time precision based on user selection
         if time_granularity == "Hourly":
-            df_filtered['Time_Bucket'] = df_filtered[sel_time].dt.floor('H')
+            df_filtered['Time_Bucket'] = df_filtered[sel_time].dt.floor('h')
         elif time_granularity == "Weekly":
             df_filtered['Time_Bucket'] = df_filtered[sel_time].dt.to_period('W').apply(lambda r: r.start_time)
         else:
@@ -73,6 +73,8 @@ if uploaded_file is not None:
         m2.metric("Countries Shown", len(selected_countries))
         if sel_sn != "None":
             m3.metric("Unique Devices", df_filtered[sel_sn].nunique())
+        else:
+            m3.metric("Unique Devices", "N/A")
 
         # --- ANALYSIS 1: Distribution ---
         st.divider()
@@ -108,9 +110,7 @@ if uploaded_file is not None:
             st.dataframe(df_filtered.sort_values(by=sel_time), use_container_width=True)
 
     except Exception as e:
-        st.error(f"Error: {e}")
-else:
-    st.info("Please upload a CSV or Excel file to start.")
+        st.error(f"Error during processing: {e}")
 
 else:
-    st.info("Please upload a file to begin the analysis.")
+    st.info("Please upload a CSV or Excel file to start.")
