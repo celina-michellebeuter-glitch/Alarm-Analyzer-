@@ -9,7 +9,7 @@ st.set_page_config(page_title="Alarm Analyzer Pro", layout="wide")
 
 st.title("Alarm Analysis Dashboard")
 
-# Hilfsfunktion für den PDF-Export (einfache Zusammenfassung)
+# Hilfsfunktion für den PDF-Export (Inklusive Uhrzeiten)
 def create_pdf(df_summary, df_details):
     pdf = FPDF()
     pdf.add_page()
@@ -26,13 +26,22 @@ def create_pdf(df_summary, df_details):
         pdf.cell(0, 8, line, ln=True)
     
     pdf.ln(10)
-    # Sektion: Details (Top 30)
+    # Sektion: Details Snippet mit Uhrzeit
     pdf.set_font("Arial", "B", 12)
-    pdf.cell(0, 10, "2. Detailed Data Snippet (Top 30)", ln=True)
-    pdf.set_font("Arial", size=8)
-    for i in range(min(len(df_details), 30)):
-        row_str = " | ".join([str(val)[:15] for val in df_details.iloc[i].values[:5]])
-        pdf.cell(0, 8, row_str, ln=True, border=1)
+    pdf.cell(0, 10, "2. Detailed Data Snippet (Timestamp incl.)", ln=True)
+    pdf.set_font("Arial", size=7)
+    
+    # Header für Snippet
+    cols = ["TIMESTAMP", "COUNTRY", "REGION"]
+    pdf.cell(0, 8, " | ".join(cols), ln=True, border=1)
+    
+    for i in range(min(len(df_details), 40)):
+        # Zeitstempel formatiert für PDF
+        ts = df_details.iloc[i]["ALARM TIMESTAMP"].strftime('%d.%m.%Y %H:%M:%S')
+        country = str(df_details.iloc[i]["COUNTRY"])
+        region = str(df_details.iloc[i].get("REGION", "N/A"))
+        row_str = f"{ts} | {country} | {region}"
+        pdf.cell(0, 7, row_str, ln=True, border=1)
         
     return pdf.output(dest='S').encode('latin-1')
 
@@ -56,6 +65,7 @@ if uploaded_file is not None:
             st.error("Missing required columns: 'COUNTRY' or 'ALARM TIMESTAMP'!")
             st.stop()
 
+        # Konvertierung zu Datetime (Wichtig für den Export mit Uhrzeit)
         df[SEL_TIME] = pd.to_datetime(df[SEL_TIME], errors='coerce')
         df = df.dropna(subset=[SEL_TIME]).sort_values(by=SEL_TIME)
 
@@ -74,8 +84,6 @@ if uploaded_file is not None:
 
         st.divider()
         col_chart, col_stat = st.columns([2, 1])
-        
-        # Stats berechnen (für Anzeige und Export)
         stats_full = df[SEL_COUNTRY].value_counts().reset_index()
         stats_full.columns = [SEL_COUNTRY, 'Count']
         stats_full['Percentage'] = (stats_full['Count'] / stats_full['Count'].sum() * 100).round(2)
@@ -136,33 +144,39 @@ if uploaded_file is not None:
         st.plotly_chart(fig_line, use_container_width=True)
 
         # ---------------------------------------------------------
-        # SECTION 3: DEEP DIVE & ALL-IN-ONE EXPORT
+        # SECTION 3: DEEP DIVE & EXPORT WITH TIME
         # ---------------------------------------------------------
         st.divider()
-        with st.expander("Uploaded Data & Download Informations"):
-            st.subheader("Final Data Selection")
-            st.dataframe(df_filtered.sort_values(by=SEL_TIME, ascending=False), use_container_width=True, hide_index=True)
+        with st.expander("Uploaded Data & Download Informations):
+            st.subheader("Final Data Selection (Sorted by Time)")
             
-            st.write("### Download Full Report")
-            st.info("The Excel file now contains two sheets: 'Summary' and 'Detailed Data'.")
+            # Für die Anzeige formatieren wir die Zeit schön
+            df_display = df_filtered.sort_values(by=SEL_TIME, ascending=False).copy()
+            st.dataframe(df_display, use_container_width=True, hide_index=True)
             
+            st.write("### Download Full Report (Including Precise Timestamps)")
             dl1, dl2, dl3 = st.columns(3)
             
-            # EXCEL mit mehreren Sheets
+            # EXCEL Export (Mit Zeit-Formatierung)
             out_xlsx = BytesIO()
+            # Wir sorgen dafür, dass Excel die Spalte als Datum/Zeit erkennt
             with pd.ExcelWriter(out_xlsx, engine='openpyxl') as writer:
                 stats_full.to_excel(writer, index=False, sheet_name='Summary')
+                # Detail-Daten exportieren
                 df_filtered.to_excel(writer, index=False, sheet_name='Detailed Data')
-            dl1.download_button("📥 Excel (Full Report)", data=out_xlsx.getvalue(), file_name="full_alarm_report.xlsx")
+                
+            dl1.download_button("📥 Excel (Summary + All Details)", data=out_xlsx.getvalue(), file_name="full_report_with_time.xlsx")
             
-            # CSV (nur Detaildaten)
-            csv_data = df_filtered.to_csv(index=False).encode('utf-8')
-            dl2.download_button("📥 CSV (Details)", data=csv_data, file_name="details.csv", mime="text/csv")
+            # CSV Export (Zeitstempel als String, damit Excel ihn nicht automatisch kürzt)
+            df_csv = df_filtered.copy()
+            df_csv[SEL_TIME] = df_csv[SEL_TIME].dt.strftime('%Y-%m-%d %H:%M:%S')
+            csv_data = df_csv.to_csv(index=False).encode('utf-8')
+            dl2.download_button("📥 CSV (Detailed Times)", data=csv_data, file_name="details_with_time.csv", mime="text/csv")
             
-            # PDF (Zusammenfassung + Snippet)
+            # PDF Export
             try:
                 pdf_bytes = create_pdf(stats_full, df_filtered)
-                dl3.download_button("📥 PDF (Summary)", data=pdf_bytes, file_name="summary.pdf", mime="application/pdf")
+                dl3.download_button("📥 PDF (Summary Report)", data=pdf_bytes, file_name="report_summary.pdf", mime="application/pdf")
             except:
                 dl3.error("PDF Export Error")
 
