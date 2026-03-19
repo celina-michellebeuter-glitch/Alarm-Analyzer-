@@ -5,79 +5,88 @@ import plotly.express as px
 # Seiteneinstellungen
 st.set_page_config(page_title="Alarm Analyse Tool", layout="wide")
 
-st.title("🛡️ Geräte- & Alarm-Auswertung")
-st.info("Lade deine Excel- oder CSV-Datei hoch, um die Verteilung nach Ländern und Zeiten zu sehen.")
+st.title("Alarm Analysis")
+st.info("Upload your Excel or CSV file. The tool will automatically calculate the distribution and timing.")
 
 # Datei Upload
-uploaded_file = st.file_uploader("Datei hier hochladen", type=["csv", "xlsx"])
+uploaded_file = st.file_uploader("Upload file here (CSV or Excel)", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
     try:
-        # Daten einlesen
+        # 1. Daten einlesen mit automatischer Formaterkennung
         if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file)
+            # sep=None und engine='python' erkennt automatisch Komma oder Semikolon
+            df = pd.read_csv(uploaded_file, sep=None, engine='python')
         else:
             df = pd.read_excel(uploaded_file)
 
-        # Spaltennamen basierend auf deinem Screenshot
-        col_country = "COUNTRY"
-        col_time = "ALARM TIMESTAMP"
-        col_system = "SYSTEM CLASS"
+        # 2. Spalten-Identifikation (Wir suchen nach COUNTRY und ALARM TIMESTAMP)
+        # Wir machen die Suche flexibel, falls Leerzeichen davor/danach sind
+        cols = {col.strip().upper(): col for col in df.columns}
+        
+        col_country = cols.get("COUNTRY")
+        col_time = cols.get("ALARM TIMESTAMP")
 
-        # Check, ob Spalten existieren
-        if col_country in df.columns and col_time in df.columns:
-            
-            # Zeitspalte umwandeln
+        if col_country and col_time:
+            # Zeitspalte in echtes Datum umwandeln
             df[col_time] = pd.to_datetime(df[col_time], errors='coerce')
+            # Zeilen ohne gültiges Datum entfernen
+            df = df.dropna(subset=[col_time])
             
-            # --- TEIL 1: GERÄTE PRO LAND ---
-            st.header("1. Betroffene Geräte pro Land")
+            # --- ANALYSE 1: GERÄTE PRO LAND ---
+            st.divider()
+            st.header("1. Affected devices by country")
             
-            # Gruppierung: Wie viele Einträge pro Land
+            # Berechnung der Anzahl und Prozente
             country_stats = df[col_country].value_counts().reset_index()
             country_stats.columns = ['Land', 'Anzahl Alarme']
             
-            # Prozentberechnung
             total_alarms = country_stats['Anzahl Alarme'].sum()
             country_stats['Anteil in %'] = ((country_stats['Anzahl Alarme'] / total_alarms) * 100).round(2)
             
-            col_left, col_right = st.columns([1, 1])
-            
-            with col_left:
-                st.subheader("Tabellarische Übersicht")
-                st.dataframe(country_stats, use_container_width=True)
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                st.subheader("Übersichtstabelle")
+                # Formatierung für die Prozentanzeige in der Tabelle
+                st.dataframe(country_stats.style.format({'Anteil in %': '{:.2f}%'}), use_container_width=True)
                 
-            with col_right:
+            with c2:
                 fig_pie = px.pie(country_stats, values='Anzahl Alarme', names='Land', 
-                                 title="Prozentuale Verteilung",
-                                 hole=0.4)
+                                 title="Prozentuale Verteilung der Alarme",
+                                 hole=0.4, color_discrete_sequence=px.colors.qualitative.Pastel)
                 st.plotly_chart(fig_pie, use_container_width=True)
 
-            # --- TEIL 2: ZEITLICHE ANALYSE ---
+            # --- ANALYSE 2: ZEITLICHE ANALYSE ---
             st.divider()
-            st.header("2. Zeitliche Analyse der Alarme")
+            st.header("2. When did the alarms go off?")
             
-            # Wir extrahieren das Datum und die Stunde für eine bessere Übersicht
+            # Datum extrahieren für die Grafik (Tag-genau)
             df['Datum'] = df[col_time].dt.date
+            timeline = df.groupby(['Datum', col_country]).size().reset_index(name='Alarme')
             
-            # Zeitverlauf Plot
-            timeline = df.groupby(['Datum', col_country]).size().reset_index(name='Anzahl')
+            fig_line = px.line(timeline, x='Datum', y='Alarme', color=col_country,
+                               markers=True, title="Time series by country",
+                               labels={'Alarme': 'Anzahl Alarme', 'Datum': 'Tag'})
             
-            fig_line = px.line(timeline, x='Datum', y='Anzahl', color=col_country,
-                               markers=True, title="Wann wurde in welchem Land Alarm ausgelöst?")
+            # Grafik schöner machen
+            fig_line.update_layout(hovermode="x unified")
             st.plotly_chart(fig_line, use_container_width=True)
             
-            # Optionale Detail-Tabelle
-            with st.expander("Rohdaten anzeigen"):
-                st.write(df[[col_country, col_system, col_time]])
+            # Rohdaten-Check
+            with st.expander("Preview of the processed data"):
+                st.write(df[[col_country, col_time]].sort_values(by=col_time))
 
         else:
-            st.error(f"Spalten nicht gefunden. Erwartet werden '{col_country}' und '{col_time}'.")
-            st.write("Vorhandene Spalten:", list(df.columns))
+            st.error("⚠️ Error: The columns ‘COUNTRY’ or ‘ALARM TIMESTAMP’ were not found.")
+            st.write("Columns found in your file:", list(df.columns))
+            st.info("Please check to make sure the column headers are in the first row of your file.")
 
     except Exception as e:
-        st.error(f"Fehler bei der Verarbeitung: {e}")
+        st.error(f"❌ A technical error has occurred: {e}")
 
 else:
     st.write("---")
-    st.write("💡 **Tipp:** Deine Datei sollte Spalten wie `COUNTRY` und `ALARM TIMESTAMP` enthalten, damit die Analyse funktioniert.")
+    st.markdown("### Anleitung:")
+    st.write("1.  Export your data as an Excel or CSV file.")
+    st.write("2. Make sure that the **‘COUNTRY’** and **‘ALARM TIMESTAMP’** columns are present.")
+    st.write("3. Upload the file above.")
