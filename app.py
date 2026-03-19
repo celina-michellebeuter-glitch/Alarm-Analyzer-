@@ -17,12 +17,8 @@ def create_pdf(dataframe):
     pdf.cell(0, 10, "Filtered Alarm Analysis Report", ln=True)
     pdf.set_font("Arial", size=8)
     pdf.ln(10)
-    
-    # Header (erste 6 Spalten für PDF-Breite)
     cols = dataframe.columns.tolist()[:6]
     pdf.cell(0, 10, " | ".join(cols), ln=True, border=1)
-    
-    # Daten (Top 100 Zeilen)
     for i in range(min(len(dataframe), 100)):
         row_str = " | ".join([str(val)[:20] for val in dataframe.iloc[i].values[:6]])
         pdf.cell(0, 10, row_str, ln=True, border=1)
@@ -95,7 +91,7 @@ if uploaded_file is not None:
             items = sorted(df[base_col].unique().tolist())
             selected_items = st.multiselect(f"Select {filter_type}s:", items, default=items)
             
-        # Diese Filterung gilt für die Timeline UND den Deep Dive
+        # Zentrale Filterung
         df_filtered = df[df[base_col].isin(selected_items)].copy()
 
         c1, c2 = st.columns(2)
@@ -129,31 +125,30 @@ if uploaded_file is not None:
         st.plotly_chart(fig_line, use_container_width=True)
 
         # ---------------------------------------------------------
-        # SECTION 3: DEEP DIVE (Fix: Hier werden nun die gefilterten Daten angezeigt)
+        # SECTION 3: DEEP DIVE & EXPORT
         # ---------------------------------------------------------
         st.divider()
         with st.expander("Uploaded Data & Download Informations"):
-            st.subheader("Filtered Data Details")
-            # Wir zeigen hier df_filtered an (alle Spalten der gewählten Länder/Regionen)
-            st.dataframe(df_filtered, use_container_width=True, hide_index=True)
+            st.subheader("Your Selection Details")
+            # Wir zeigen hier df_filtered inklusive der Zeit-Sortierung
+            st.write(f"This table shows all columns for your selected {filter_type}s.")
+            st.dataframe(df_filtered.sort_values(by=SEL_TIME, ascending=False), use_container_width=True, hide_index=True)
             
-            st.write("### Download your Selection")
+            st.write("### Download this exact view")
             dl1, dl2, dl3 = st.columns(3)
             
-            # EXCEL
+            # Downloads basieren auf df_filtered (exakte Auswahl)
             out_xlsx = BytesIO()
             with pd.ExcelWriter(out_xlsx, engine='openpyxl') as writer:
                 df_filtered.to_excel(writer, index=False)
-            dl1.download_button("📥 Excel", data=out_xlsx.getvalue(), file_name="export.xlsx")
+            dl1.download_button("📥 Excel (.xlsx)", data=out_xlsx.getvalue(), file_name="selection_export.xlsx")
             
-            # CSV
             csv_data = df_filtered.to_csv(index=False).encode('utf-8')
-            dl2.download_button("📥 CSV", data=csv_data, file_name="export.csv", mime="text/csv")
+            dl2.download_button("📥 CSV (.csv)", data=csv_data, file_name="selection_export.csv", mime="text/csv")
             
-            # PDF
             try:
                 pdf_bytes = create_pdf(df_filtered)
-                dl3.download_button("📥 PDF", data=pdf_bytes, file_name="export.pdf", mime="application/pdf")
+                dl3.download_button("📥 PDF (.pdf)", data=pdf_bytes, file_name="selection_export.pdf", mime="application/pdf")
             except:
                 dl3.error("PDF Export Error")
 
