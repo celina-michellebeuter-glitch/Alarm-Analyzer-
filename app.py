@@ -147,7 +147,7 @@ if uploaded_file is not None:
         # SECTION 3: DEEP DIVE & EXPORT WITH TIME
         # ---------------------------------------------------------
         st.divider()
-        with st.expander("Uploaded Data & Download Informations):
+        with st.expander("Uploaded Data & Download Informations"):
             st.subheader("Final Data Selection (Sorted by Time)")
             
             # Für die Anzeige formatieren wir die Zeit schön
