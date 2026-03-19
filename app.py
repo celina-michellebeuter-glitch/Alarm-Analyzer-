@@ -3,7 +3,7 @@ import pandas as pd
 import plotly.express as px
 
 # 1. Page Configuration
-st.set_page_config(page_title="Custom Alarm Analyzer", layout="wide")
+st.set_page_config(page_title="Alarm Analyzer Pro", layout="wide")
 
 st.title("📊 Alarm Analysis Dashboard")
 
@@ -18,115 +18,126 @@ if uploaded_file is not None:
         else:
             df = pd.read_excel(uploaded_file)
 
-        # --- SIDEBAR: GLOBAL MAPPING ONLY ---
+        # --- SIDEBAR: FIXED GLOBAL MAPPING ---
         st.sidebar.header("📍 Global Mapping")
-        st.sidebar.info("Define which columns represent your core data types.")
-        all_cols = list(df.columns)
-
-        def guess(opts, keys):
-            for k in keys:
-                for o in opts:
-                    if k.lower() in str(o).lower(): return o
-            return opts[0]
-
-        sel_country = st.sidebar.selectbox("Primary Category (e.g. Country/Region)", all_cols, 
-            index=all_cols.index(guess(all_cols, ["country", "land", "region"])))
+        st.sidebar.success("Mapping is fixed to your data structure.")
         
-        sel_time = st.sidebar.selectbox("Timestamp Column", all_cols, 
-            index=all_cols.index(guess(all_cols, ["time", "timestamp", "date"])))
+        # Festgelegte Spaltennamen basierend auf deinem Screenshot
+        # Falls die Spalten exakt so heißen, nutzen wir sie direkt.
+        # Falls nicht, säubern wir die Namen im Hintergrund.
+        df.columns = [c.strip() for c in df.columns]
+        
+        SEL_COUNTRY = "COUNTRY"
+        SEL_REGION = "REGION"
+        SEL_TIME = "ALARM TIMESTAMP"
+
+        # Check if mandatory columns exist
+        if SEL_COUNTRY not in df.columns or SEL_TIME not in df.columns:
+            st.error(f"Required columns '{SEL_COUNTRY}' or '{SEL_TIME}' missing in file!")
+            st.stop()
 
         # Pre-process time globally
-        df[sel_time] = pd.to_datetime(df[sel_time], errors='coerce')
-        df = df.dropna(subset=[sel_time]).sort_values(by=sel_time)
+        df[SEL_TIME] = pd.to_datetime(df[SEL_TIME], errors='coerce')
+        df = df.dropna(subset=[SEL_TIME]).sort_values(by=SEL_TIME)
 
         # ---------------------------------------------------------
-        # SECTION 1: QUICK SUMMARY (Unfiltered Overview)
+        # SECTION 1: QUICK SUMMARY (Full Overview)
         # ---------------------------------------------------------
         st.header("1. Quick Summary")
-        m1, m2 = st.columns(2)
-        m1.metric("Total Alarms in File", len(df))
-        m2.metric("Total Countries/Regions", df[sel_country].nunique())
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Total Alarms", len(df))
+        m2.metric("Countries", df[SEL_COUNTRY].nunique())
+        if SEL_REGION in df.columns:
+            m3.metric("Regions", df[SEL_REGION].nunique())
 
         st.divider()
         col_chart, col_stat = st.columns([2, 1])
         
-        stats_full = df[sel_country].value_counts().reset_index()
-        stats_full.columns = [sel_country, 'Count']
+        stats_full = df[SEL_COUNTRY].value_counts().reset_index()
+        stats_full.columns = [SEL_COUNTRY, 'Count']
         stats_full['%'] = (stats_full['Count'] / stats_full['Count'].sum() * 100).round(2)
 
         with col_chart:
-            fig_pie = px.pie(stats_full, values='Count', names=sel_country, hole=0.5, 
-                             title="Overall Distribution",
+            fig_pie = px.pie(stats_full, values='Count', names=SEL_COUNTRY, hole=0.5, 
+                             title="Overall Country Distribution",
                              color_discrete_sequence=px.colors.qualitative.Pastel)
             st.plotly_chart(fig_pie, use_container_width=True)
             
         with col_stat:
-            st.write("### Full Statistics")
+            st.write("### Statistics")
             st.dataframe(stats_full.style.format({'%': '{:.2f}%'}), use_container_width=True)
 
         # ---------------------------------------------------------
-        # SECTION 2: TIMELINE ANALYSIS (With Local Filters)
+        # SECTION 2: TIMELINE ANALYSIS (Dynamic Filter)
         # ---------------------------------------------------------
         st.divider()
         st.header("2. Timeline Analysis")
-        st.markdown("Filter and group the data specifically for this timeline view.")
 
-        # Local Filters for Timeline
-        t_filter_row = st.container()
-        with t_filter_row:
-            # 1. Filter for Country/Region
-            available_items = sorted(df[sel_country].unique().tolist())
-            selected_items = st.multiselect(f"Filter {sel_country}:", 
-                                            options=available_items, 
-                                            default=available_items)
+        # Dynamic Filtering Logic
+        t_col1, t_col2 = st.columns([1, 2])
+        
+        with t_col1:
+            # Entscheiden: Land oder Region?
+            filter_type = st.radio("Filter Timeline by:", ["Country", "Region"], horizontal=True)
             
-            # 2. Controls for View
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                # Dynamically allow coloring by any column
-                color_by_opt = st.selectbox("Color lines by:", all_cols, 
-                                            index=all_cols.index(sel_country))
-            with c2:
-                time_view = st.radio("Group by:", ["Exact Time", "Day", "Week", "Month"], horizontal=True, index=1)
-            with c3:
-                st.write("") # Spacer
+        with t_col2:
+            if filter_type == "Country":
+                options = sorted(df[SEL_COUNTRY].unique().tolist())
+                selected_items = st.multiselect("Select Countries:", options, default=options)
+                df_timeline = df[df[SEL_COUNTRY].isin(selected_items)].copy()
+                color_target = SEL_COUNTRY
+            else:
+                if SEL_REGION in df.columns:
+                    options = sorted(df[SEL_REGION].unique().tolist())
+                    selected_items = st.multiselect("Select Regions:", options, default=options)
+                    df_timeline = df[df[SEL_REGION].isin(selected_items)].copy()
+                    color_target = SEL_REGION
+                else:
+                    st.warning("No 'REGION' column found in your file.")
+                    df_timeline = df.copy()
+                    color_target = SEL_COUNTRY
 
-        # Apply Local Filters
-        df_timeline = df[df[sel_country].isin(selected_items)].copy()
+        # Timeline Controls
+        c1, c2 = st.columns(2)
+        with c1:
+            time_view = st.radio("Group by:", ["Exact Time", "Day", "Week", "Month"], horizontal=True, index=1)
+        with c2:
+            # Optionaler zweiter Farb-Filter (z.B. nach Severity oder Module)
+            extra_color = st.checkbox("Color by different category?")
+            if extra_color:
+                color_target = st.selectbox("Choose Category:", [c for c in df.columns if c != SEL_TIME])
 
         # Grouping Logic
         if time_view == "Day":
-            df_timeline['Time_Group'] = df_timeline[sel_time].dt.date
+            df_timeline['Time_Group'] = df_timeline[SEL_TIME].dt.date
         elif time_view == "Week":
-            df_timeline['Time_Group'] = df_timeline[sel_time].dt.to_period('W').apply(lambda r: r.start_time)
+            df_timeline['Time_Group'] = df_timeline[SEL_TIME].dt.to_period('W').apply(lambda r: r.start_time)
         elif time_view == "Month":
-            df_timeline['Time_Group'] = df_timeline[sel_time].dt.to_period('M').apply(lambda r: r.start_time)
+            df_timeline['Time_Group'] = df_timeline[SEL_TIME].dt.to_period('M').apply(lambda r: r.start_time)
         else:
-            df_timeline['Time_Group'] = df_timeline[sel_time]
+            df_timeline['Time_Group'] = df_timeline[SEL_TIME]
 
-        timeline_data = df_timeline.groupby(['Time_Group', color_by_opt]).size().reset_index(name='Alarms')
+        timeline_data = df_timeline.groupby(['Time_Group', color_target]).size().reset_index(name='Alarms')
         
-        fig_line = px.line(timeline_data, x='Time_Group', y='Alarms', color=color_by_opt,
-                           markers=True, title=f"Timeline of Alarms (Filtered)")
+        fig_line = px.line(timeline_data, x='Time_Group', y='Alarms', color=color_target,
+                           markers=True, title=f"Timeline trends (Filtered by {filter_type})")
         fig_line.update_xaxes(rangeslider_visible=True)
         st.plotly_chart(fig_line, use_container_width=True)
 
         # ---------------------------------------------------------
-        # SECTION 3: DEEP DIVE & RAW DATA
+        # SECTION 3: DEEP DIVE
         # ---------------------------------------------------------
         st.divider()
-        with st.expander("🔍 Deep Dive: Cross-Comparison & Data Table"):
+        with st.expander("🔍 Deep Dive & Raw Data"):
             st.subheader("Comparison Chart")
-            comp_col = st.selectbox("Compare primary category against:", [c for c in all_cols if c != sel_time], index=0)
-            
-            fig_bar = px.histogram(df, x=sel_country, color=comp_col, barmode="group", text_auto=True)
+            comp_col = st.selectbox("Compare Countries against:", [c for c in df.columns if c != SEL_TIME], index=0)
+            fig_bar = px.histogram(df, x=SEL_COUNTRY, color=comp_col, barmode="group", text_auto=True)
             st.plotly_chart(fig_bar, use_container_width=True)
 
             st.divider()
-            st.subheader("Raw Data Table")
+            st.subheader("Full Data Explorer")
             st.dataframe(df, use_container_width=True)
             
-            # Export
             csv = df.to_csv(index=False).encode('utf-8')
             st.download_button("Download current data as CSV", data=csv, file_name="export.csv", mime="text/csv")
 
