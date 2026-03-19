@@ -29,7 +29,7 @@ if uploaded_file is not None:
                     if k.lower() in str(o).lower(): return o
             return opts[0]
 
-        # These stay as your primary anchors
+        # Primary selection for Country and Time
         sel_country = st.sidebar.selectbox("Primary Category (Country)", all_cols, 
             index=all_cols.index(guess(all_cols, ["country", "land", "region"])))
         
@@ -58,16 +58,10 @@ if uploaded_file is not None:
         # ---------------------------------------------------------
         st.header("1. Quick Summary")
         
-        # Metrics Row
-        m1, m2, m3, m4 = st.columns(4)
+        # Metrics Row - Simplified to only show Alarms and Countries
+        m1, m2 = st.columns(2)
         m1.metric("Total Alarms", len(df_f))
-        m2.metric("Countries", df_f[sel_country].nunique())
-        
-        # If there are other columns, show some extra info
-        if len(all_cols) > 2:
-            extra_col = guess(all_cols, ["module", "system", "severity", "code"])
-            m3.metric(f"Top {extra_col}", df_f[extra_col].mode()[0] if not df_f.empty else "N/A")
-            m4.metric("Avg Alarms/Country", round(len(df_f)/df_f[sel_country].nunique(), 1) if df_f[sel_country].nunique() > 0 else 0)
+        m2.metric("Countries Affected", df_f[sel_country].nunique())
 
         # The Circle/Pie Chart right at the top
         st.divider()
