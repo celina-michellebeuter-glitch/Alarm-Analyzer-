@@ -29,12 +29,11 @@ def create_pdf(df_summary, df_details):
     pdf.cell(0, 10, "2. Detailed Data Snippet", ln=True)
     pdf.set_font("Arial", size=7)
     
-    cols = ["TIMESTAMP", "COUNTRY"]
-    pdf.cell(0, 8, " | ".join(cols), ln=True, border=1)
+    # PDF Header
+    pdf.cell(0, 8, "TIMESTAMP | COUNTRY", ln=True, border=1)
     
     for i in range(min(len(df_details), 40)):
         ts = df_details.iloc[i]["ALARM TIMESTAMP"]
-        # Falls es ein String ist, so lassen, sonst formatieren
         ts_str = ts if isinstance(ts, str) else ts.strftime('%d.%m.%Y %H:%M:%S')
         row_str = f"{ts_str} | {df_details.iloc[i]['COUNTRY']}"
         pdf.cell(0, 7, row_str, ln=True, border=1)
@@ -51,7 +50,6 @@ if uploaded_file is not None:
         else:
             df = pd.read_excel(uploaded_file)
 
-        # --- CLEANING & MAPPING ---
         df.columns = [c.strip() for c in df.columns]
         SEL_COUNTRY = "COUNTRY"
         SEL_REGION = "REGION"
@@ -61,17 +59,15 @@ if uploaded_file is not None:
             st.error("Missing required columns!")
             st.stop()
 
-        # Zeit konvertieren
         df[SEL_TIME] = pd.to_datetime(df[SEL_TIME], errors='coerce')
         df = df.dropna(subset=[SEL_TIME]).sort_values(by=SEL_TIME)
 
-        # Color Mapping
         unique_countries = sorted(df[SEL_COUNTRY].unique().tolist())
         color_palette = px.colors.qualitative.Prism + px.colors.qualitative.Safe
         color_map = {country: color_palette[i % len(color_palette)] for i, country in enumerate(unique_countries)}
 
         # ---------------------------------------------------------
-        # SECTION 1: QUICK SUMMARY
+        # SECTION 1: QUICK SUMMARY (Mit Zeit-Häkchen)
         # ---------------------------------------------------------
         st.header("1. Quick Summary")
         m1, m2 = st.columns(2)
@@ -90,8 +86,12 @@ if uploaded_file is not None:
                              title="Overall Distribution", color=SEL_COUNTRY, color_discrete_map=color_map)
             fig_pie.update_traces(textposition='inside', textinfo='percent+label')
             st.plotly_chart(fig_pie, use_container_width=True)
+            
         with col_stat:
             st.write("### Statistics Table")
+            # --- ZEIT-HÄKCHEN JETZT HIER ---
+            show_full_time = st.checkbox("✅ Include exact timestamps in exports/tables", value=True)
+            
             display_stats = stats_full.copy()
             display_stats['Percentage'] = display_stats['Percentage'].astype(str) + " %"
             st.dataframe(display_stats, use_container_width=True, hide_index=True)
@@ -140,19 +140,16 @@ if uploaded_file is not None:
         st.plotly_chart(fig_line, use_container_width=True)
 
         # ---------------------------------------------------------
-        # SECTION 3: DEEP DIVE & EXPORT OPTION
+        # SECTION 3: DEEP DIVE & EXPORT
         # ---------------------------------------------------------
         st.divider()
         with st.expander("Uploaded Data & Download Informations"):
             st.subheader("Final Data Selection")
             
-            # --- NEUE OPTION FÜR UHRZEIT ---
-            show_full_time = st.checkbox("✅ Show exact timestamps (Include hours/mins/secs)", value=True)
-            
             df_final_view = df_filtered.sort_values(by=SEL_TIME, ascending=False).copy()
             
+            # Zeitformatierung basierend auf dem Häkchen oben in Sektion 1
             if show_full_time:
-                # Wir erzwingen das Format als Text, damit Excel es nicht ändert
                 df_final_view[SEL_TIME] = df_final_view[SEL_TIME].dt.strftime('%d.%m.%Y %H:%M:%S')
             
             st.dataframe(df_final_view, use_container_width=True, hide_index=True)
@@ -165,7 +162,7 @@ if uploaded_file is not None:
             with pd.ExcelWriter(out_xlsx, engine='openpyxl') as writer:
                 stats_full.to_excel(writer, index=False, sheet_name='Summary')
                 df_final_view.to_excel(writer, index=False, sheet_name='Detailed Data')
-            dl1.download_button("📥 Excel (Full Report)", data=out_xlsx.getvalue(), file_name="alarm_report.xlsx")
+            dl1.download_button("📥 Excel", data=out_xlsx.getvalue(), file_name="alarm_report.xlsx")
             
             # CSV
             csv_data = df_final_view.to_csv(index=False).encode('utf-8')
@@ -181,4 +178,4 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Error: {e}")
 else:
-    st.info("Please upload a file to start.")
+    st.info("Bitte Datei hochladen.")
