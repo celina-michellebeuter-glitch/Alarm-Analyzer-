@@ -9,19 +9,31 @@ st.set_page_config(page_title="Alarm Analyzer Pro", layout="wide")
 
 st.title("Alarm Analysis Dashboard")
 
-# Hilfsfunktion für den PDF-Export
-def create_pdf(dataframe):
+# Hilfsfunktion für den PDF-Export (einfache Zusammenfassung)
+def create_pdf(df_summary, df_details):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "Filtered Alarm Analysis Report", ln=True)
-    pdf.set_font("Arial", size=8)
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, "Alarm Analysis Executive Report", ln=True, align='C')
     pdf.ln(10)
-    cols = dataframe.columns.tolist()[:6]
-    pdf.cell(0, 10, " | ".join(cols), ln=True, border=1)
-    for i in range(min(len(dataframe), 100)):
-        row_str = " | ".join([str(val)[:20] for val in dataframe.iloc[i].values[:6]])
-        pdf.cell(0, 10, row_str, ln=True, border=1)
+    
+    # Sektion: Summary
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, "1. Summary by Country", ln=True)
+    pdf.set_font("Arial", size=10)
+    for i in range(len(df_summary)):
+        line = f"{df_summary.iloc[i, 0]}: {df_summary.iloc[i, 1]} Alarms ({df_summary.iloc[i, 2]}%)"
+        pdf.cell(0, 8, line, ln=True)
+    
+    pdf.ln(10)
+    # Sektion: Details (Top 30)
+    pdf.set_font("Arial", "B", 12)
+    pdf.cell(0, 10, "2. Detailed Data Snippet (Top 30)", ln=True)
+    pdf.set_font("Arial", size=8)
+    for i in range(min(len(df_details), 30)):
+        row_str = " | ".join([str(val)[:15] for val in df_details.iloc[i].values[:5]])
+        pdf.cell(0, 8, row_str, ln=True, border=1)
+        
     return pdf.output(dest='S').encode('latin-1')
 
 # 2. File Upload
@@ -47,7 +59,7 @@ if uploaded_file is not None:
         df[SEL_TIME] = pd.to_datetime(df[SEL_TIME], errors='coerce')
         df = df.dropna(subset=[SEL_TIME]).sort_values(by=SEL_TIME)
 
-        # Fixed Color Mapping
+        # Color Mapping
         unique_countries = sorted(df[SEL_COUNTRY].unique().tolist())
         color_palette = px.colors.qualitative.Prism + px.colors.qualitative.Safe
         color_map = {country: color_palette[i % len(color_palette)] for i, country in enumerate(unique_countries)}
@@ -57,11 +69,13 @@ if uploaded_file is not None:
         # ---------------------------------------------------------
         st.header("1. Quick Summary")
         m1, m2 = st.columns(2)
-        m1.metric("Total Alarms in File", len(df))
-        m2.metric("Countries", df[SEL_COUNTRY].nunique())
+        m1.metric("Total Alarms", len(df))
+        m2.metric("Countries Affected", df[SEL_COUNTRY].nunique())
 
         st.divider()
         col_chart, col_stat = st.columns([2, 1])
+        
+        # Stats berechnen (für Anzeige und Export)
         stats_full = df[SEL_COUNTRY].value_counts().reset_index()
         stats_full.columns = [SEL_COUNTRY, 'Count']
         stats_full['Percentage'] = (stats_full['Count'] / stats_full['Count'].sum() * 100).round(2)
@@ -72,7 +86,7 @@ if uploaded_file is not None:
             fig_pie.update_traces(textposition='inside', textinfo='percent+label')
             st.plotly_chart(fig_pie, use_container_width=True)
         with col_stat:
-            st.write("### Statistics")
+            st.write("### Statistics Table")
             display_stats = stats_full.copy()
             display_stats['Percentage'] = display_stats['Percentage'].astype(str) + " %"
             st.dataframe(display_stats, use_container_width=True, hide_index=True)
@@ -91,7 +105,6 @@ if uploaded_file is not None:
             items = sorted(df[base_col].unique().tolist())
             selected_items = st.multiselect(f"Select {filter_type}s:", items, default=items)
             
-        # Zentrale Filterung
         df_filtered = df[df[base_col].isin(selected_items)].copy()
 
         c1, c2 = st.columns(2)
@@ -101,9 +114,9 @@ if uploaded_file is not None:
             extra_color = st.checkbox("Color by different category?")
             color_target = base_col
             if extra_color:
-                color_target = st.selectbox("Choose Category to compare:", [c for c in df.columns if c != SEL_TIME and c != base_col])
+                color_target = st.selectbox("Choose Category:", [c for c in df.columns if c != SEL_TIME and c != base_col])
 
-        # Grouping Logic
+        # Grouping
         df_timeline = df_filtered.copy()
         if time_view == "Day": df_timeline['Time Period'] = df_timeline[SEL_TIME].dt.date
         elif time_view == "Week": df_timeline['Time Period'] = df_timeline[SEL_TIME].dt.to_period('W').apply(lambda r: r.start_time)
@@ -118,37 +131,38 @@ if uploaded_file is not None:
                            color_discrete_map=color_map if color_target == SEL_COUNTRY else None,
                            custom_data=[base_col] if extra_color else None)
 
-        hover_content = f"<b>{filter_type}:</b> %{{customdata[0]}}<br>" if extra_color else ""
-        hover_content += f"<b>{color_target}:</b> %{{fullData.name}}<br><b>Exact Time:</b> %{{x|%d.%m.%Y %H:%M:%S}}<br><b>Alarms:</b> %{{y}}<extra></extra>"
-        fig_line.update_traces(hovertemplate=hover_content, marker=dict(size=8))
+        fig_line.update_traces(hovertemplate="<b>%{fullData.name}</b><br>Time: %{x|%d.%m.%Y %H:%M:%S}<br>Alarms: %{y}<extra></extra>", marker=dict(size=8))
         fig_line.update_xaxes(rangeslider_visible=True, tickformat="%d.%m.\n%H:%M")
         st.plotly_chart(fig_line, use_container_width=True)
 
         # ---------------------------------------------------------
-        # SECTION 3: DEEP DIVE & EXPORT
+        # SECTION 3: DEEP DIVE & ALL-IN-ONE EXPORT
         # ---------------------------------------------------------
         st.divider()
         with st.expander("Uploaded Data & Download Informations"):
-            st.subheader("Your Selection Details")
-            # Wir zeigen hier df_filtered inklusive der Zeit-Sortierung
-            st.write(f"This table shows all columns for your selected {filter_type}s.")
+            st.subheader("Final Data Selection")
             st.dataframe(df_filtered.sort_values(by=SEL_TIME, ascending=False), use_container_width=True, hide_index=True)
             
-            st.write("### Download this exact view")
+            st.write("### Download Full Report")
+            st.info("The Excel file now contains two sheets: 'Summary' and 'Detailed Data'.")
+            
             dl1, dl2, dl3 = st.columns(3)
             
-            # Downloads basieren auf df_filtered (exakte Auswahl)
+            # EXCEL mit mehreren Sheets
             out_xlsx = BytesIO()
             with pd.ExcelWriter(out_xlsx, engine='openpyxl') as writer:
-                df_filtered.to_excel(writer, index=False)
-            dl1.download_button("📥 Excel (.xlsx)", data=out_xlsx.getvalue(), file_name="selection_export.xlsx")
+                stats_full.to_excel(writer, index=False, sheet_name='Summary')
+                df_filtered.to_excel(writer, index=False, sheet_name='Detailed Data')
+            dl1.download_button("📥 Excel (Full Report)", data=out_xlsx.getvalue(), file_name="full_alarm_report.xlsx")
             
+            # CSV (nur Detaildaten)
             csv_data = df_filtered.to_csv(index=False).encode('utf-8')
-            dl2.download_button("📥 CSV (.csv)", data=csv_data, file_name="selection_export.csv", mime="text/csv")
+            dl2.download_button("📥 CSV (Details)", data=csv_data, file_name="details.csv", mime="text/csv")
             
+            # PDF (Zusammenfassung + Snippet)
             try:
-                pdf_bytes = create_pdf(df_filtered)
-                dl3.download_button("📥 PDF (.pdf)", data=pdf_bytes, file_name="selection_export.pdf", mime="application/pdf")
+                pdf_bytes = create_pdf(stats_full, df_filtered)
+                dl3.download_button("📥 PDF (Summary)", data=pdf_bytes, file_name="summary.pdf", mime="application/pdf")
             except:
                 dl3.error("PDF Export Error")
 
