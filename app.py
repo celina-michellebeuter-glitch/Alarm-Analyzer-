@@ -2,18 +2,18 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Basic Page Configuration
+# 1. Page Configuration
 st.set_page_config(page_title="Advanced Alarm Analyzer", layout="wide")
 
 st.title("🚀 Advanced Global Alarm Analyzer")
 st.markdown("Analyze your device data with high precision and custom filters.")
 
-# 1. File Upload
+# 2. File Upload
 uploaded_file = st.file_uploader("Upload your data file (CSV or Excel)", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
     try:
-        # Load data
+        # Load data with automatic separator detection
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file, sep=None, engine='python')
         else:
@@ -38,7 +38,6 @@ if uploaded_file is not None:
         sel_time = st.sidebar.selectbox("Timestamp Column", all_columns, 
             index=all_columns.index(guess_col(all_columns, ["time", "timestamp", "date"])))
         
-        # Optional: Serial Number for "Unique Devices" count
         sel_sn = st.sidebar.selectbox("Device ID / Serial Number (Optional)", ["None"] + all_columns)
 
         st.sidebar.divider()
@@ -46,7 +45,7 @@ if uploaded_file is not None:
         
         # Time Precision Setting
         time_granularity = st.sidebar.radio("Time Precision", 
-                                          ["Hourly", "Daily", "Weekly"], index=1)
+                                          ["Hourly", "Daily", "Weekly"], index=0) # Default to Hourly for precision
         
         # Dynamic Filter for Countries
         unique_countries = sorted(df[sel_country].unique().tolist())
@@ -55,17 +54,18 @@ if uploaded_file is not None:
         # Apply Country Filter
         df_filtered = df[df[sel_country].isin(selected_countries)].copy()
 
-        # 2. Data Processing (Precision)
+        # 3. Data Processing (Precision Fix)
         df_filtered[sel_time] = pd.to_datetime(df_filtered[sel_time], errors='coerce')
         df_filtered = df_filtered.dropna(subset=[sel_time])
 
-        # Adjust time precision based on user selection
+        # Logic for accurate Time Buckets
         if time_granularity == "Hourly":
             df_filtered['Time_Bucket'] = df_filtered[sel_time].dt.floor('h')
         elif time_granularity == "Weekly":
             df_filtered['Time_Bucket'] = df_filtered[sel_time].dt.to_period('W').apply(lambda r: r.start_time)
         else:
-            df_filtered['Time_Bucket'] = df_filtered[sel_time].dt.date
+            # Daily: Convert back to datetime to keep Plotly axis clean
+            df_filtered['Time_Bucket'] = pd.to_datetime(df_filtered[sel_time].dt.date)
 
         # --- DASHBOARD METRICS ---
         m1, m2, m3 = st.columns(3)
@@ -94,23 +94,32 @@ if uploaded_file is not None:
 
         # --- ANALYSIS 2: Precise Timeline ---
         st.divider()
-        st.header(f"Timeline Analysis ({time_granularity})")
+        st.header(f"Timeline Analysis ({time_granularity} Precision)")
         
         timeline = df_filtered.groupby(['Time_Bucket', sel_country]).size().reset_index(name='Count')
+        
+        # Ensure Time_Bucket is sorted for the line chart
+        timeline = timeline.sort_values('Time_Bucket')
         
         fig_line = px.line(timeline, x='Time_Bucket', y='Count', color=sel_country, markers=True,
                            title="Alarm Trends Over Time",
                            labels={'Count': 'Number of Alarms', 'Time_Bucket': 'Time'})
         
+        # Improvement: Custom Date Format on X-Axis
+        fig_line.update_xaxes(
+            dtick=3600000 if time_granularity == "Hourly" else None, # Tick every hour if hourly
+            tickformat="%d %b %Y\n%H:%M" if time_granularity == "Hourly" else "%d %b %Y"
+        )
+        
         fig_line.update_layout(hovermode="x unified")
         st.plotly_chart(fig_line, use_container_width=True)
 
-        # Raw Data
-        with st.expander("Show Data Table"):
+        # 4. Raw Data Table
+        with st.expander("Show Detailed Data Table"):
             st.dataframe(df_filtered.sort_values(by=sel_time), use_container_width=True)
 
     except Exception as e:
-        st.error(f"Error during processing: {e}")
+        st.error(f"❌ Error during processing: {e}")
 
 else:
     st.info("Please upload a CSV or Excel file to start.")
