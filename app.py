@@ -9,7 +9,7 @@ st.set_page_config(page_title="Alarm Analyzer Pro", layout="wide")
 
 st.title("Alarm Analysis Dashboard")
 
-# Hilfsfunktion für den PDF-Export
+# --- PDF Helper ---
 def create_pdf(df_summary, df_details):
     pdf = FPDF()
     pdf.add_page()
@@ -29,15 +29,12 @@ def create_pdf(df_summary, df_details):
     pdf.cell(0, 10, "2. Detailed Data Snippet", ln=True)
     pdf.set_font("Arial", size=7)
     
-    # PDF Header
     pdf.cell(0, 8, "TIMESTAMP | COUNTRY", ln=True, border=1)
-    
     for i in range(min(len(df_details), 40)):
         ts = df_details.iloc[i]["ALARM TIMESTAMP"]
         ts_str = ts if isinstance(ts, str) else ts.strftime('%d.%m.%Y %H:%M:%S')
         row_str = f"{ts_str} | {df_details.iloc[i]['COUNTRY']}"
         pdf.cell(0, 7, row_str, ln=True, border=1)
-        
     return pdf.output(dest='S').encode('latin-1')
 
 # 2. File Upload
@@ -67,7 +64,7 @@ if uploaded_file is not None:
         color_map = {country: color_palette[i % len(color_palette)] for i, country in enumerate(unique_countries)}
 
         # ---------------------------------------------------------
-        # SECTION 1: QUICK SUMMARY (Mit Zeit-Häkchen)
+        # SECTION 1: QUICK SUMMARY & DATA CONFIGURATION
         # ---------------------------------------------------------
         st.header("1. Quick Summary")
         m1, m2 = st.columns(2)
@@ -88,10 +85,14 @@ if uploaded_file is not None:
             st.plotly_chart(fig_pie, use_container_width=True)
             
         with col_stat:
-            st.write("### Statistics Table")
-            # --- ZEIT-HÄKCHEN JETZT HIER ---
-            show_full_time = st.checkbox("✅ Include exact timestamps in exports/tables", value=True)
+            # --- NEUER FILTER-BEREICH FÜR TABELLEN-EINSTELLUNGEN ---
+            st.subheader("⚙️ Table & Export Settings")
+            show_full_time = st.checkbox("Show precise timestamps (HH:MM:SS)", 
+                                         value=True, 
+                                         help="Check this to force Excel and tables to display full time details.")
             
+            st.divider()
+            st.write("### Statistics per Country")
             display_stats = stats_full.copy()
             display_stats['Percentage'] = display_stats['Percentage'].astype(str) + " %"
             st.dataframe(display_stats, use_container_width=True, hide_index=True)
@@ -121,7 +122,6 @@ if uploaded_file is not None:
             if extra_color:
                 color_target = st.selectbox("Choose Category:", [c for c in df.columns if c != SEL_TIME and c != base_col])
 
-        # Grouping
         df_timeline = df_filtered.copy()
         if time_view == "Day": df_timeline['Time Period'] = df_timeline[SEL_TIME].dt.date
         elif time_view == "Week": df_timeline['Time Period'] = df_timeline[SEL_TIME].dt.to_period('W').apply(lambda r: r.start_time)
@@ -134,7 +134,6 @@ if uploaded_file is not None:
         
         fig_line = px.line(timeline_data, x='Time Period', y='Alarms', color=color_target, markers=True,
                            color_discrete_map=color_map if color_target == SEL_COUNTRY else None)
-
         fig_line.update_traces(hovertemplate="<b>%{fullData.name}</b><br>Time: %{x|%d.%m.%Y %H:%M:%S}<br>Alarms: %{y}<extra></extra>", marker=dict(size=8))
         fig_line.update_xaxes(rangeslider_visible=True, tickformat="%d.%m.\n%H:%M")
         st.plotly_chart(fig_line, use_container_width=True)
@@ -144,11 +143,9 @@ if uploaded_file is not None:
         # ---------------------------------------------------------
         st.divider()
         with st.expander("Uploaded Data & Download Informations"):
-            st.subheader("Final Data Selection")
-            
             df_final_view = df_filtered.sort_values(by=SEL_TIME, ascending=False).copy()
             
-            # Zeitformatierung basierend auf dem Häkchen oben in Sektion 1
+            # Nutzt die Einstellung aus Sektion 1
             if show_full_time:
                 df_final_view[SEL_TIME] = df_final_view[SEL_TIME].dt.strftime('%d.%m.%Y %H:%M:%S')
             
