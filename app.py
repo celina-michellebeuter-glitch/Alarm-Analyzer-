@@ -41,16 +41,14 @@ if uploaded_file is not None:
         st.sidebar.divider()
         st.sidebar.header("🎯 Dynamic Filters")
         
-        # We create a dictionary to store multiple filters
-        filters = {}
-        # Select columns you want to filter by (e.g. Severity, Module Type)
+        # Select columns to filter by
         filter_cols = st.sidebar.multiselect("Add Filters for:", 
                                             [c for c in all_cols if c != sel_time],
                                             default=[sel_country])
 
         df_f = df.copy()
         for col in filter_cols:
-            unique_vals = sorted(df[col].unique().tolist())
+            unique_vals = sorted(df[col].dropna().unique().tolist())
             selected_vals = st.sidebar.multiselect(f"Filter {col}", unique_vals, default=unique_vals)
             df_f = df_f[df_f[col].isin(selected_vals)]
 
@@ -62,15 +60,16 @@ if uploaded_file is not None:
         st.divider()
         m1, m2, m3 = st.columns(3)
         m1.metric("Total Alarms (Filtered)", len(df_f))
-        m2.metric("Active Countries", df_f[sel_country].nunique())
-        # Show variety of the first additional filter if exists
-        if len(filter_cols) > 1:
-            m3.metric(f"Unique {filter_cols[1]}", df_f[filter_cols[1]].nunique())
+        m2.metric("Active Groups", df_f[sel_country].nunique())
+        
+        if len(filter_cols) > 0:
+            m3.metric(f"Top {filter_cols[0]}", df_f[filter_cols[0]].mode()[0] if not df_f.empty else "N/A")
 
         # --- ANALYSIS 1: COMPARISON CHART ---
         st.header("1. Cross-Category Comparison")
-        comp_col = st.selectbox("Compare Countries by which Category?", [c for c in all_cols if c != sel_time], 
-                                index=all_columns.index(guess(all_cols, ["module", "system", "severity"])) if "module" in str(all_cols).lower() else 0)
+        # Hier war der Fehler: all_cols statt all_columns
+        comp_col = st.selectbox("Compare with which Category?", [c for c in all_cols if c != sel_time], 
+                                index=0)
         
         fig_comp = px.histogram(df_f, x=sel_country, color=comp_col, barmode="group",
                                 title=f"Comparison: {sel_country} vs {comp_col}",
@@ -81,8 +80,7 @@ if uploaded_file is not None:
         st.divider()
         st.header("2. Timeline & Trends")
         
-        # Option to color the timeline by a different category
-        color_by = st.selectbox("Color Timeline by:", filter_cols, index=0)
+        color_by = st.selectbox("Color Timeline by:", filter_cols if filter_cols else [sel_country], index=0)
         
         timeline = df_f.groupby([sel_time, color_by]).size().reset_index(name='Alarms')
         
