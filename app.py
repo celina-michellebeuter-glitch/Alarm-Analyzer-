@@ -2,27 +2,11 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from io import BytesIO
-from fpdf import FPDF
 
 # 1. Page Configuration
 st.set_page_config(page_title="Alarm Analyzer Pro", layout="wide")
 
 st.title("Alarm Analysis Dashboard")
-
-# Hilfsfunktion für PDF-Erstellung
-def create_pdf(dataframe):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(40, 10, "Alarm Analysis Report")
-    pdf.ln(20)
-    pdf.set_font("Arial", size=10)
-    
-    # Schreibe die ersten 20 Zeilen (für ein vollständiges PDF-Reporting wäre mehr Logik nötig)
-    for i in range(min(len(dataframe), 50)):
-        row_str = ", ".join([str(val) for val in dataframe.iloc[i].values])
-        pdf.multi_cell(0, 10, row_str)
-    return pdf.output(dest='S').encode('latin-1')
 
 # 2. File Upload
 uploaded_file = st.file_uploader("Upload your CSV or Excel file", type=["csv", "xlsx"])
@@ -35,51 +19,60 @@ if uploaded_file is not None:
         else:
             df = pd.read_excel(uploaded_file)
 
-        # --- SIDEBAR: FIXED GLOBAL MAPPING ---
-        st.sidebar.header("📍 Global Mapping")
-        st.sidebar.success("Mapping is fixed to your data structure.")
+        # --- CLEANING & MAPPING ---
         df.columns = [c.strip() for c in df.columns]
-        
         SEL_COUNTRY = "COUNTRY"
         SEL_REGION = "REGION"
         SEL_TIME = "ALARM TIMESTAMP"
 
         if SEL_COUNTRY not in df.columns or SEL_TIME not in df.columns:
-            st.error(f"Required columns '{SEL_COUNTRY}' or '{SEL_TIME}' missing!")
+            st.error(f"Required columns missing!")
             st.stop()
 
         df[SEL_TIME] = pd.to_datetime(df[SEL_TIME], errors='coerce')
         df = df.dropna(subset=[SEL_TIME]).sort_values(by=SEL_TIME)
 
+        # --- FIXED COLOR MAPPING ---
+        # Wir erstellen eine feste Farbpalette für alle Länder, damit sie überall gleich bleiben
+        unique_countries = sorted(df[SEL_COUNTRY].unique().tolist())
+        color_palette = px.colors.qualitative.Prism + px.colors.qualitative.Safe # Große Palette
+        color_map = {country: color_palette[i % len(color_palette)] for i, country in enumerate(unique_countries)}
+
         # ---------------------------------------------------------
         # SECTION 1: QUICK SUMMARY
         # ---------------------------------------------------------
         st.header("1. Quick Summary")
-        m1, m2, m3 = st.columns(3)
+        m1, m2 = st.columns(2)
         m1.metric("Total Alarms", len(df))
-        m2.metric("Countries", df[SEL_COUNTRY].nunique())
-        if SEL_REGION in df.columns:
-            m3.metric("Regions", df[SEL_REGION].nunique())
+        m2.metric("Countries Affected", df[SEL_COUNTRY].nunique())
 
         st.divider()
         col_chart, col_stat = st.columns([2, 1])
+        
+        # Stats berechnen
         stats_full = df[SEL_COUNTRY].value_counts().reset_index()
         stats_full.columns = [SEL_COUNTRY, 'Count']
-        
+        stats_full['Percentage'] = (stats_full['Count'] / stats_full['Count'].sum() * 100).round(2)
+        stats_full['Percentage'] = stats_full['Percentage'].astype(str) + " %"
+
         with col_chart:
             fig_pie = px.pie(stats_full, values='Count', names=SEL_COUNTRY, hole=0.5, 
-                             title="Overall Country Distribution")
+                             title="Overall Country Distribution",
+                             color=SEL_COUNTRY, color_discrete_map=color_map)
+            fig_pie.update_traces(textposition='inside', textinfo='percent+label')
             st.plotly_chart(fig_pie, use_container_width=True)
+            
         with col_stat:
-            st.write("### Statistics")
-            st.dataframe(stats_full, use_container_width=True)
+            st.write("### Statistics per Country")
+            st.dataframe(stats_full, use_container_width=True, hide_index=True)
 
         # ---------------------------------------------------------
         # SECTION 2: TIMELINE ANALYSIS
         # ---------------------------------------------------------
         st.divider()
         st.header("2. Timeline Analysis")
-        
+
+        # Dynamic Filtering
         t_col1, t_col2 = st.columns([1, 2])
         with t_col1:
             filter_type = st.radio("Filter Timeline by:", ["Country", "Region"], horizontal=True)
@@ -90,6 +83,7 @@ if uploaded_file is not None:
             
         df_timeline = df[df[base_col].isin(selected_items)].copy()
 
+        # Timeline Controls
         c1, c2 = st.columns(2)
         with c1:
             time_view = st.radio("Group by:", ["Exact Time", "Day", "Week", "Month"], horizontal=True, index=0)
@@ -99,6 +93,7 @@ if uploaded_file is not None:
             if extra_color:
                 color_target = st.selectbox("Choose Category to compare:", [c for c in df.columns if c != SEL_TIME and c != base_col])
 
+        # Grouping Logic
         if time_view == "Day": df_timeline['Time Period'] = df_timeline[SEL_TIME].dt.date
         elif time_view == "Week": df_timeline['Time Period'] = df_timeline[SEL_TIME].dt.to_period('W').apply(lambda r: r.start_time)
         elif time_view == "Month": df_timeline['Time Period'] = df_timeline[SEL_TIME].dt.to_period('M').apply(lambda r: r.start_time)
@@ -108,7 +103,11 @@ if uploaded_file is not None:
         if extra_color: group_cols.append(color_target)
         timeline_data = df_timeline.groupby(group_cols).size().reset_index(name='Alarms')
         
-        fig_line = px.line(timeline_data, x='Time Period', y='Alarms', color=color_target, markers=True,
+        # Line Chart mit der festen Farbkarte
+        fig_line = px.line(timeline_data, x='Time Period', y='Alarms', color=color_target,
+                           markers=True, title=f"Timeline Trends",
+                           # Wir nutzen color_discrete_map nur, wenn nach Country gefärbt wird
+                           color_discrete_map=color_map if color_target == SEL_COUNTRY else None,
                            custom_data=[base_col] if extra_color else None)
 
         hover_content = f"<b>{filter_type}:</b> %{{customdata[0]}}<br>" if extra_color else ""
@@ -118,34 +117,20 @@ if uploaded_file is not None:
         st.plotly_chart(fig_line, use_container_width=True)
 
         # ---------------------------------------------------------
-        # SECTION 3: DEEP DIVE & EXPORT
+        # SECTION 3: DEEP DIVE
         # ---------------------------------------------------------
         st.divider()
-        with st.expander("Uploaded Data & Download Informations"):
-            st.subheader("Data Explorer")
-            # Wir nutzen die gefilterten Daten der Timeline für den Export
+        with st.expander("🔍 Deep Dive & Export"):
+            st.subheader("Filtered Data Explorer")
+            # Wir zeigen die Daten an, die in Sektion 2 gefiltert wurden
             df_export = df_timeline.drop(columns=['Time Period']) if 'Time Period' in df_timeline.columns else df_timeline
-            st.dataframe(df_export, use_container_width=True)
-            
-            st.write("### Choose Export Format")
-            ex_col1, ex_col2, ex_col3 = st.columns(3)
-            
-            # CSV Export
-            csv = df_export.to_csv(index=False).encode('utf-8')
-            ex_col1.download_button("📥 Download as CSV", data=csv, file_name="alarm_export.csv", mime="text/csv")
+            st.dataframe(df_export, use_container_width=True, hide_index=True)
             
             # Excel Export
             output_excel = BytesIO()
             with pd.ExcelWriter(output_excel, engine='openpyxl') as writer:
-                df_export.to_excel(writer, index=False, sheet_name='Alarms')
-            ex_col2.download_button("📥 Download as Excel", data=output_excel.getvalue(), file_name="alarm_export.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-            
-            # PDF Export (Basic)
-            try:
-                pdf_data = create_pdf(df_export)
-                ex_col3.download_button("📥 Download as PDF (Table)", data=pdf_data, file_name="alarm_export.pdf", mime="application/pdf")
-            except:
-                ex_col3.warning("PDF-Export limited due to encoding.")
+                df_export.to_excel(writer, index=False)
+            st.download_button("📥 Download filtered data as Excel", data=output_excel.getvalue(), file_name="alarm_export.xlsx")
 
     except Exception as e:
         st.error(f"Error: {e}")
