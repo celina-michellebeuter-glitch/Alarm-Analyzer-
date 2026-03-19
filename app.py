@@ -3,123 +3,112 @@ import pandas as pd
 import plotly.express as px
 
 # 1. Page Configuration
-st.set_page_config(page_title="Advanced Alarm Analyzer", layout="wide")
+st.set_page_config(page_title="Ultimate Data Analyzer", layout="wide")
 
-st.title("🚀 Advanced Global Alarm Analyzer")
-st.markdown("Analyze your device data with high precision and custom filters.")
+st.title("🔍 Multi-Dimensional Alarm Analyzer")
+st.markdown("Compare countries, modules, and error codes with dynamic filters.")
 
 # 2. File Upload
-uploaded_file = st.file_uploader("Upload your data file (CSV or Excel)", type=["csv", "xlsx"])
+uploaded_file = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx"])
 
 if uploaded_file is not None:
     try:
-        # Load data with automatic separator detection
+        # Load data
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file, sep=None, engine='python')
         else:
             df = pd.read_excel(uploaded_file)
 
-        st.success(f"✅ Data loaded: {len(df)} rows")
+        st.success(f"✅ Loaded {len(df)} entries.")
         
-        # --- SIDEBAR SETTINGS ---
-        st.sidebar.header("⚙️ Column Mapping")
-        all_columns = list(df.columns)
+        # --- SIDEBAR: DYNAMIC SETTINGS ---
+        st.sidebar.header("⚙️ Global Mapping")
+        all_cols = list(df.columns)
 
-        def guess_col(options, keywords):
-            for k in keywords:
-                for opt in options:
-                    if k.lower() in str(opt).lower():
-                        return opt
-            return options[0]
+        # Smart detection for core columns
+        def guess(opts, keys):
+            for k in keys:
+                for o in opts:
+                    if k.lower() in str(o).lower(): return o
+            return opts[0]
 
-        sel_country = st.sidebar.selectbox("Country Column", all_columns, 
-            index=all_columns.index(guess_col(all_columns, ["country", "land"])))
+        sel_country = st.sidebar.selectbox("Primary Category (e.g. COUNTRY)", all_cols, 
+            index=all_cols.index(guess(all_cols, ["country", "land", "region"])))
         
-        sel_time = st.sidebar.selectbox("Timestamp Column", all_columns, 
-            index=all_columns.index(guess_col(all_columns, ["time", "timestamp", "date"])))
-        
-        sel_sn = st.sidebar.selectbox("Device ID / Serial Number (Optional)", ["None"] + all_columns)
+        sel_time = st.sidebar.selectbox("Timestamp Column", all_cols, 
+            index=all_cols.index(guess(all_cols, ["time", "timestamp", "date"])))
 
         st.sidebar.divider()
-        st.sidebar.header("🔍 Filters & Precision")
+        st.sidebar.header("🎯 Dynamic Filters")
         
-        # Time Precision Setting
-        time_granularity = st.sidebar.radio("Time Precision", 
-                                          ["Hourly", "Daily", "Weekly"], index=0) # Default to Hourly for precision
-        
-        # Dynamic Filter for Countries
-        unique_countries = sorted(df[sel_country].unique().tolist())
-        selected_countries = st.sidebar.multiselect("Filter Countries", unique_countries, default=unique_countries)
+        # We create a dictionary to store multiple filters
+        filters = {}
+        # Select columns you want to filter by (e.g. Severity, Module Type)
+        filter_cols = st.sidebar.multiselect("Add Filters for:", 
+                                            [c for c in all_cols if c != sel_time],
+                                            default=[sel_country])
 
-        # Apply Country Filter
-        df_filtered = df[df[sel_country].isin(selected_countries)].copy()
+        df_f = df.copy()
+        for col in filter_cols:
+            unique_vals = sorted(df[col].unique().tolist())
+            selected_vals = st.sidebar.multiselect(f"Filter {col}", unique_vals, default=unique_vals)
+            df_f = df_f[df_f[col].isin(selected_vals)]
 
-        # 3. Data Processing (Precision Fix)
-        df_filtered[sel_time] = pd.to_datetime(df_filtered[sel_time], errors='coerce')
-        df_filtered = df_filtered.dropna(subset=[sel_time])
-
-        # Logic for accurate Time Buckets
-        if time_granularity == "Hourly":
-            df_filtered['Time_Bucket'] = df_filtered[sel_time].dt.floor('h')
-        elif time_granularity == "Weekly":
-            df_filtered['Time_Bucket'] = df_filtered[sel_time].dt.to_period('W').apply(lambda r: r.start_time)
-        else:
-            # Daily: Convert back to datetime to keep Plotly axis clean
-            df_filtered['Time_Bucket'] = pd.to_datetime(df_filtered[sel_time].dt.date)
+        # 3. Data Processing
+        df_f[sel_time] = pd.to_datetime(df_f[sel_time], errors='coerce')
+        df_f = df_f.dropna(subset=[sel_time]).sort_values(by=sel_time)
 
         # --- DASHBOARD METRICS ---
+        st.divider()
         m1, m2, m3 = st.columns(3)
-        m1.metric("Total Alarms", len(df_filtered))
-        m2.metric("Countries Shown", len(selected_countries))
-        if sel_sn != "None":
-            m3.metric("Unique Devices", df_filtered[sel_sn].nunique())
-        else:
-            m3.metric("Unique Devices", "N/A")
+        m1.metric("Total Alarms (Filtered)", len(df_f))
+        m2.metric("Active Countries", df_f[sel_country].nunique())
+        # Show variety of the first additional filter if exists
+        if len(filter_cols) > 1:
+            m3.metric(f"Unique {filter_cols[1]}", df_f[filter_cols[1]].nunique())
 
-        # --- ANALYSIS 1: Distribution ---
-        st.divider()
-        col1, col2 = st.columns([1, 2])
+        # --- ANALYSIS 1: COMPARISON CHART ---
+        st.header("1. Cross-Category Comparison")
+        comp_col = st.selectbox("Compare Countries by which Category?", [c for c in all_cols if c != sel_time], 
+                                index=all_columns.index(guess(all_cols, ["module", "system", "severity"])) if "module" in str(all_cols).lower() else 0)
         
-        with col1:
-            st.subheader("Distribution Stats")
-            stats = df_filtered[sel_country].value_counts().reset_index()
-            stats.columns = [sel_country, 'Alarms']
-            stats['%'] = (stats['Alarms'] / stats['Alarms'].sum() * 100).round(2)
-            st.dataframe(stats, use_container_width=True)
-            
-        with col2:
-            fig_pie = px.pie(stats, values='Alarms', names=sel_country, hole=0.4, 
-                             title=f"Alarms per {sel_country}", color_discrete_sequence=px.colors.qualitative.Bold)
-            st.plotly_chart(fig_pie, use_container_width=True)
+        fig_comp = px.histogram(df_f, x=sel_country, color=comp_col, barmode="group",
+                                title=f"Comparison: {sel_country} vs {comp_col}",
+                                text_auto=True)
+        st.plotly_chart(fig_comp, use_container_width=True)
 
-        # --- ANALYSIS 2: Precise Timeline ---
+        # --- ANALYSIS 2: NATURAL TIMELINE ---
         st.divider()
-        st.header(f"Timeline Analysis ({time_granularity} Precision)")
+        st.header("2. Timeline & Trends")
         
-        timeline = df_filtered.groupby(['Time_Bucket', sel_country]).size().reset_index(name='Count')
+        # Option to color the timeline by a different category
+        color_by = st.selectbox("Color Timeline by:", filter_cols, index=0)
         
-        # Ensure Time_Bucket is sorted for the line chart
-        timeline = timeline.sort_values('Time_Bucket')
+        timeline = df_f.groupby([sel_time, color_by]).size().reset_index(name='Alarms')
         
-        fig_line = px.line(timeline, x='Time_Bucket', y='Count', color=sel_country, markers=True,
-                           title="Alarm Trends Over Time",
-                           labels={'Count': 'Number of Alarms', 'Time_Bucket': 'Time'})
+        fig_line = px.scatter(timeline, x=sel_time, y='Alarms', color=color_by,
+                           title=f"Events over Time (Colored by {color_by})")
         
-        # Improvement: Custom Date Format on X-Axis
-        fig_line.update_xaxes(
-            dtick=3600000 if time_granularity == "Hourly" else None, # Tick every hour if hourly
-            tickformat="%d %b %Y\n%H:%M" if time_granularity == "Hourly" else "%d %b %Y"
-        )
-        
+        fig_line.update_traces(mode='lines+markers', marker=dict(size=8))
+        fig_line.update_xaxes(rangeslider_visible=True)
         fig_line.update_layout(hovermode="x unified")
         st.plotly_chart(fig_line, use_container_width=True)
 
-        # 4. Raw Data Table
-        with st.expander("Show Detailed Data Table"):
-            st.dataframe(df_filtered.sort_values(by=sel_time), use_container_width=True)
+        # --- DOWNLOAD SECTION ---
+        st.divider()
+        st.subheader("📥 Export Results")
+        csv = df_f.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Download Filtered Data as CSV",
+            data=csv,
+            file_name="filtered_alarm_data.csv",
+            mime="text/csv",
+        )
+
+        with st.expander("Raw Data Preview"):
+            st.dataframe(df_f, use_container_width=True)
 
     except Exception as e:
-        st.error(f"❌ Error during processing: {e}")
-
+        st.error(f"Analysis Error: {e}")
 else:
-    st.info("Please upload a CSV or Excel file to start.")
+    st.info("Upload a file to unlock advanced comparisons.")
