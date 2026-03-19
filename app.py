@@ -5,7 +5,7 @@ import plotly.express as px
 # 1. Page Configuration
 st.set_page_config(page_title="Alarm Analyzer Pro", layout="wide")
 
-st.title("📊 Alarm Analysis Dashboard")
+st.title("Alarm Analysis Dashboard")
 
 # 2. File Upload
 uploaded_file = st.file_uploader("Upload your CSV or Excel file", type=["csv", "xlsx"])
@@ -22,11 +22,10 @@ if uploaded_file is not None:
         st.sidebar.header("📍 Global Mapping")
         st.sidebar.success("Mapping is fixed to your data structure.")
         
-        # Festgelegte Spaltennamen basierend auf deinem Screenshot
-        # Falls die Spalten exakt so heißen, nutzen wir sie direkt.
-        # Falls nicht, säubern wir die Namen im Hintergrund.
+        # Clean column names (remove whitespace)
         df.columns = [c.strip() for c in df.columns]
         
+        # Hardcoded column names based on your requirement
         SEL_COUNTRY = "COUNTRY"
         SEL_REGION = "REGION"
         SEL_TIME = "ALARM TIMESTAMP"
@@ -41,7 +40,7 @@ if uploaded_file is not None:
         df = df.dropna(subset=[SEL_TIME]).sort_values(by=SEL_TIME)
 
         # ---------------------------------------------------------
-        # SECTION 1: QUICK SUMMARY (Full Overview)
+        # SECTION 1: QUICK SUMMARY
         # ---------------------------------------------------------
         st.header("1. Quick Summary")
         m1, m2, m3 = st.columns(3)
@@ -68,7 +67,7 @@ if uploaded_file is not None:
             st.dataframe(stats_full.style.format({'%': '{:.2f}%'}), use_container_width=True)
 
         # ---------------------------------------------------------
-        # SECTION 2: TIMELINE ANALYSIS (Dynamic Filter)
+        # SECTION 2: TIMELINE ANALYSIS (Refined Hover & Grouping)
         # ---------------------------------------------------------
         st.divider()
         st.header("2. Timeline Analysis")
@@ -77,7 +76,6 @@ if uploaded_file is not None:
         t_col1, t_col2 = st.columns([1, 2])
         
         with t_col1:
-            # Entscheiden: Land oder Region?
             filter_type = st.radio("Filter Timeline by:", ["Country", "Region"], horizontal=True)
             
         with t_col2:
@@ -102,26 +100,40 @@ if uploaded_file is not None:
         with c1:
             time_view = st.radio("Group by:", ["Exact Time", "Day", "Week", "Month"], horizontal=True, index=1)
         with c2:
-            # Optionaler zweiter Farb-Filter (z.B. nach Severity oder Module)
             extra_color = st.checkbox("Color by different category?")
             if extra_color:
                 color_target = st.selectbox("Choose Category:", [c for c in df.columns if c != SEL_TIME])
 
-        # Grouping Logic
+        # Grouping Logic with cleaner naming
         if time_view == "Day":
-            df_timeline['Time_Group'] = df_timeline[SEL_TIME].dt.date
+            df_timeline['Time Period'] = df_timeline[SEL_TIME].dt.date
         elif time_view == "Week":
-            df_timeline['Time_Group'] = df_timeline[SEL_TIME].dt.to_period('W').apply(lambda r: r.start_time)
+            df_timeline['Time Period'] = df_timeline[SEL_TIME].dt.to_period('W').apply(lambda r: r.start_time)
         elif time_view == "Month":
-            df_timeline['Time_Group'] = df_timeline[SEL_TIME].dt.to_period('M').apply(lambda r: r.start_time)
+            df_timeline['Time Period'] = df_timeline[SEL_TIME].dt.to_period('M').apply(lambda r: r.start_time)
         else:
-            df_timeline['Time_Group'] = df_timeline[SEL_TIME]
+            df_timeline['Time Period'] = df_timeline[SEL_TIME]
 
-        timeline_data = df_timeline.groupby(['Time_Group', color_target]).size().reset_index(name='Alarms')
+        # Aggregate data for the chart
+        timeline_data = df_timeline.groupby(['Time Period', color_target]).size().reset_index(name='Alarms')
         
-        fig_line = px.line(timeline_data, x='Time_Group', y='Alarms', color=color_target,
+        # Build the chart
+        fig_line = px.line(timeline_data, x='Time Period', y='Alarms', color=color_target,
                            markers=True, title=f"Timeline trends (Filtered by {filter_type})")
-        fig_line.update_xaxes(rangeslider_visible=True)
+
+        # IMPROVEMENT: Add exact timestamps to hover data
+        # We use a trick: we map the original timestamps back to the points for the hover tooltip
+        fig_line.update_traces(
+            hovertemplate="<b>%{label}</b><br>Alarms: %{y}<br>Period: %{x}<extra></extra>"
+        )
+        
+        # Better X-Axis Formatting
+        fig_line.update_xaxes(
+            rangeslider_visible=True,
+            tickformat="%d %b %Y\n%H:%M" if time_view == "Exact Time" else "%d %b %Y"
+        )
+        
+        fig_line.update_layout(hovermode="x unified")
         st.plotly_chart(fig_line, use_container_width=True)
 
         # ---------------------------------------------------------
