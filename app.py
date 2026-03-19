@@ -36,7 +36,7 @@ if uploaded_file is not None:
             index=all_cols.index(guess(all_cols, ["time", "timestamp", "date"])))
 
         st.sidebar.divider()
-        st.sidebar.header("🎯 Additional Filters")
+        st.sidebar.header("🎯 Global Filters")
         
         available_filter_cols = [c for c in all_cols if c != sel_time]
         filter_selection = st.sidebar.multiselect("Active Filters:", available_filter_cols, default=[sel_country])
@@ -78,12 +78,22 @@ if uploaded_file is not None:
             st.dataframe(stats.style.format({'%': '{:.2f}%'}), use_container_width=True)
 
         # ---------------------------------------------------------
-        # SECTION 2: TIMELINE ANALYSIS (WITH DATE FILTERS)
+        # SECTION 2: TIMELINE ANALYSIS (WITH LOCAL COUNTRY FILTER)
         # ---------------------------------------------------------
         st.divider()
         st.header("2. Timeline Analysis")
         
-        # New Controls for Timeline
+        # Local Filter for Timeline
+        countries_in_data = sorted(df_f[sel_country].unique().tolist())
+        selected_timeline_countries = st.multiselect(
+            f"Select {sel_country} for Timeline View:", 
+            options=countries_in_data, 
+            default=countries_in_data
+        )
+
+        # Apply Local Filter to Timeline Data
+        df_timeline_filtered = df_f[df_f[sel_country].isin(selected_timeline_countries)].copy()
+
         t_col1, t_col2 = st.columns(2)
         with t_col1:
             color_by_opt = st.selectbox("Color timeline by:", filter_selection if filter_selection else [sel_country])
@@ -91,22 +101,21 @@ if uploaded_file is not None:
             time_view = st.radio("Group timeline by:", ["Exact Time", "Day", "Week", "Month", "Year"], horizontal=True, index=1)
 
         # Grouping Logic
-        df_timeline = df_f.copy()
         if time_view == "Day":
-            df_timeline['Time_Group'] = df_timeline[sel_time].dt.date
+            df_timeline_filtered['Time_Group'] = df_timeline_filtered[sel_time].dt.date
         elif time_view == "Week":
-            df_timeline['Time_Group'] = df_timeline[sel_time].dt.to_period('W').apply(lambda r: r.start_time)
+            df_timeline_filtered['Time_Group'] = df_timeline_filtered[sel_time].dt.to_period('W').apply(lambda r: r.start_time)
         elif time_view == "Month":
-            df_timeline['Time_Group'] = df_timeline[sel_time].dt.to_period('M').apply(lambda r: r.start_time)
+            df_timeline_filtered['Time_Group'] = df_timeline_filtered[sel_time].dt.to_period('M').apply(lambda r: r.start_time)
         elif time_view == "Year":
-            df_timeline['Time_Group'] = df_timeline[sel_time].dt.to_period('Y').apply(lambda r: r.start_time)
+            df_timeline_filtered['Time_Group'] = df_timeline_filtered[sel_time].dt.to_period('Y').apply(lambda r: r.start_time)
         else:
-            df_timeline['Time_Group'] = df_timeline[sel_time]
+            df_timeline_filtered['Time_Group'] = df_timeline_filtered[sel_time]
 
-        timeline_data = df_timeline.groupby(['Time_Group', color_by_opt]).size().reset_index(name='Alarms')
+        timeline_data = df_timeline_filtered.groupby(['Time_Group', color_by_opt]).size().reset_index(name='Alarms')
         
         fig_line = px.line(timeline_data, x='Time_Group', y='Alarms', color=color_by_opt,
-                           markers=True, title=f"Trends per {time_view}")
+                           markers=True, title=f"Trends for selected {sel_country}")
         
         fig_line.update_xaxes(rangeslider_visible=True, title="Time")
         fig_line.update_layout(hovermode="x unified")
