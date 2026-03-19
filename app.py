@@ -64,7 +64,7 @@ if uploaded_file is not None:
         color_map = {country: color_palette[i % len(color_palette)] for i, country in enumerate(unique_countries)}
 
         # ---------------------------------------------------------
-        # SECTION 1: QUICK SUMMARY & DATA CONFIGURATION
+        # SECTION 1: QUICK SUMMARY
         # ---------------------------------------------------------
         st.header("1. Quick Summary")
         m1, m2 = st.columns(2)
@@ -85,13 +85,6 @@ if uploaded_file is not None:
             st.plotly_chart(fig_pie, use_container_width=True)
             
         with col_stat:
-            # --- NEUER FILTER-BEREICH FÜR TABELLEN-EINSTELLUNGEN ---
-            st.subheader("⚙️ Table & Export Settings")
-            show_full_time = st.checkbox("Show precise timestamps (HH:MM:SS)", 
-                                         value=True, 
-                                         help="Check this to force Excel and tables to display full time details.")
-            
-            st.divider()
             st.write("### Statistics per Country")
             display_stats = stats_full.copy()
             display_stats['Percentage'] = display_stats['Percentage'].astype(str) + " %"
@@ -145,10 +138,7 @@ if uploaded_file is not None:
         with st.expander("🔍 Deep Dive: Complete Analysis Export"):
             df_final_view = df_filtered.sort_values(by=SEL_TIME, ascending=False).copy()
             
-            # Nutzt die Einstellung aus Sektion 1
-            if show_full_time:
-                df_final_view[SEL_TIME] = df_final_view[SEL_TIME].dt.strftime('%d.%m.%Y %H:%M:%S')
-            
+            # Anzeige der Tabelle (nutzt Standard-Formatierung ohne Häkchen)
             st.dataframe(df_final_view, use_container_width=True, hide_index=True)
             
             st.write("### Download Full Report")
