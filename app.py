@@ -129,7 +129,7 @@ if uploaded_file is not None:
         # SECTION 3: DEEP DIVE
         # ---------------------------------------------------------
         st.divider()
-        with st.expander("🔍 Deep Dive & Raw Data"):
+        with st.expander("Uploaded Raw Data"):
             st.subheader("Full Data Explorer")
             st.dataframe(df, use_container_width=True)
             csv = df.to_csv(index=False).encode('utf-8')
